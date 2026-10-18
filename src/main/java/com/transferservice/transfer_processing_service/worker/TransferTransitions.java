@@ -2,6 +2,7 @@ package com.transferservice.transfer_processing_service.worker;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 
 import com.transferservice.transfer_processing_service.integration.fineract.FineractOperation;
@@ -176,6 +177,62 @@ class TransferTransitions {
 		audit(transfer, "PAYMENT_FAILED", TransferState.PAYMENT_PENDING, owner, detail);
 	}
 
+	/**
+	 * Records the intent to refund before Fineract is called. Returns empty, and does
+	 * nothing, if the transfer is flagged for reconciliation: a provider callback has since
+	 * claimed the payment succeeded, and refunding could pay out twice.
+	 */
+	@Transactional
+	public Optional<FinancialOperation> beginRefund(UUID transferId, String owner) {
+		Transfer transfer = leased(transferId, owner, TransferState.PAYMENT_FAILED);
+		if (transfer.isReconciliationRequired()) {
+			transfer.clearNextAttempt();
+			return Optional.empty();
+		}
+		FinancialOperation refund = this.operations
+			.save(FinancialOperation.pending(transfer, FinancialOperation.Type.REFUND));
+		transfer.moveTo(TransferState.REFUND_PENDING);
+		transfer.resetAttempts();
+		transfer.scheduleNextAttempt(this.retryPolicy.afterLease());
+		audit(transfer, "REFUND_REQUESTED", TransferState.PAYMENT_FAILED, owner,
+				Map.of("operationReference", refund.getOperationReference(), "originalReference",
+						FinancialOperation.Type.DEBIT.referenceFor(transfer), "amount",
+						refund.getAmount().toPlainString()));
+		return Optional.of(refund);
+	}
+
+	@Transactional
+	public void recordRefundOutcome(UUID transferId, String owner, FineractOperation result, String source) {
+		Transfer transfer = leased(transferId, owner, TransferState.REFUND_PENDING);
+		FinancialOperation refund = refundOf(transfer);
+		Map<String, Object> detail = new HashMap<>();
+		detail.put("operationReference", refund.getOperationReference());
+		detail.put("source", source);
+		if (result.committed()) {
+			refund.markSucceeded(result.transactionId());
+			transfer.moveTo(TransferState.REFUNDED);
+			detail.put("transactionId", result.transactionId());
+			audit(transfer, "REFUND_CONFIRMED", TransferState.REFUND_PENDING, owner, detail);
+		}
+		else {
+			refund.markFailed(result.rejectionReason());
+			transfer.flagForReconciliation();
+			transfer.clearNextAttempt();
+			detail.put("reason", String.valueOf(result.rejectionReason()));
+			audit(transfer, "REFUND_REJECTED", TransferState.REFUND_PENDING, owner, detail);
+		}
+	}
+
+	@Transactional
+	public void recordRefundUnknown(UUID transferId, String owner, String error) {
+		Transfer transfer = leased(transferId, owner, TransferState.REFUND_PENDING);
+		FinancialOperation refund = refundOf(transfer);
+		refund.markUnknown(error);
+		transfer.recordUnresolvedAttempt(this.retryPolicy.nextAttempt(transfer.getAttemptCount()));
+		audit(transfer, "REFUND_OUTCOME_UNKNOWN", TransferState.REFUND_PENDING, owner,
+				Map.of("operationReference", refund.getOperationReference(), "error", String.valueOf(error)));
+	}
+
 	/** Something only a human can resolve; stop automatic processing but keep the state. */
 	@Transactional
 	public void flagForReconciliation(UUID transferId, String owner, TransferState expected, String reason) {
@@ -206,6 +263,11 @@ class TransferTransitions {
 
 	private FinancialOperation debitOf(Transfer transfer) {
 		return this.operations.findByTransferIdAndOperationType(transfer.getId(), FinancialOperation.Type.DEBIT)
+			.orElseThrow();
+	}
+
+	private FinancialOperation refundOf(Transfer transfer) {
+		return this.operations.findByTransferIdAndOperationType(transfer.getId(), FinancialOperation.Type.REFUND)
 			.orElseThrow();
 	}
 

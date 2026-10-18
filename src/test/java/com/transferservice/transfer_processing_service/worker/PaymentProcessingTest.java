@@ -32,10 +32,10 @@ class PaymentProcessingTest extends WorkerTestSupport {
 	}
 
 	@Test
-	void confirmedPaymentFailureMarksTransferForRefund() {
+	void confirmedPaymentFailureLeadsToRefund() {
 		TransferResponse transfer = accept("Invoice SIM:FAIL");
 
-		awaitState(transfer.reference(), TransferState.PAYMENT_FAILED);
+		awaitState(transfer.reference(), TransferState.REFUNDED);
 		assertThat(transfer(transfer.reference()).getFailureReason()).isEqualTo("SIMULATED_FAILURE");
 		assertThat(operation(transfer.reference(), FinancialOperation.Type.PAYMENT).getStatus())
 			.isEqualTo(FinancialOperation.Status.FAILED);
@@ -77,7 +77,9 @@ class PaymentProcessingTest extends WorkerTestSupport {
 
 		resolvePayment(transfer.reference(), "FAILED", false);
 
-		awaitState(transfer.reference(), TransferState.PAYMENT_FAILED);
+		awaitState(transfer.reference(), TransferState.REFUNDED);
+		assertThat(eventTypes(transfer.reference())).containsSubsequence("PAYMENT_ACCEPTED", "PAYMENT_FAILED",
+				"REFUND_CONFIRMED");
 	}
 
 	@Test
@@ -103,7 +105,7 @@ class PaymentProcessingTest extends WorkerTestSupport {
 	void providerRefusalIsADefiniteFailure() {
 		TransferResponse transfer = accept("Invoice SIM:NOT_A_REAL_TOKEN");
 
-		awaitState(transfer.reference(), TransferState.PAYMENT_FAILED);
+		awaitState(transfer.reference(), TransferState.REFUNDED);
 		assertThat(transfer(transfer.reference()).getFailureReason()).isEqualTo("UNKNOWN_SCENARIO");
 		assertThat(providerPayments(transfer.reference())).isZero();
 	}

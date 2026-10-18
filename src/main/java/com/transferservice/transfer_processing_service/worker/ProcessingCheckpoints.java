@@ -14,7 +14,10 @@ public interface ProcessingCheckpoints {
 		AFTER_DEBIT_CALL,
 
 		/** The provider answered the submission, but the worker has not saved the answer yet. */
-		AFTER_PAYMENT_CALL
+		AFTER_PAYMENT_CALL,
+
+		/** Fineract answered the refund, but the worker has not saved the answer yet. */
+		AFTER_REFUND_CALL
 
 	}
 

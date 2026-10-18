@@ -23,7 +23,8 @@ class TransferRecovery {
 
 	/** States with an automatic next step. */
 	static final List<String> ACTIONABLE_STATES = List.of(TransferState.RECEIVED.name(),
-			TransferState.DEBIT_PENDING.name(), TransferState.DEBITED.name(), TransferState.PAYMENT_PENDING.name());
+			TransferState.DEBIT_PENDING.name(), TransferState.DEBITED.name(), TransferState.PAYMENT_PENDING.name(),
+			TransferState.PAYMENT_FAILED.name(), TransferState.REFUND_PENDING.name());
 
 	private static final Logger log = LoggerFactory.getLogger(TransferRecovery.class);
 

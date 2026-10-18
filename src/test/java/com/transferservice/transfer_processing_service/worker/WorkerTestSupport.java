@@ -1,6 +1,7 @@
 package com.transferservice.transfer_processing_service.worker;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -16,6 +17,7 @@ import com.transferservice.transfer_processing_service.TestPartners;
 import com.transferservice.transfer_processing_service.TestPartners.TestPartner;
 import com.transferservice.transfer_processing_service.TestTransfers;
 import com.transferservice.transfer_processing_service.TestcontainersConfiguration;
+import com.transferservice.transfer_processing_service.common.Hashing;
 import com.transferservice.transfer_processing_service.transfer.FinancialOperation;
 import com.transferservice.transfer_processing_service.transfer.FinancialOperationRepository;
 import com.transferservice.transfer_processing_service.transfer.Transfer;
@@ -32,6 +34,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.MediaType;
+import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.web.client.RestClient;
@@ -50,6 +54,8 @@ import static org.awaitility.Awaitility.await;
 				"mock.provider.delayed-callback-ms=1500", "worker.lease-seconds=2", "worker.retry.initial-ms=200",
 				"worker.retry.max-ms=1000", "worker.recovery.poll-ms=200" })
 abstract class WorkerTestSupport {
+
+	static final String CALLBACK_SECRET = "dev-callback-secret";
 
 	@LocalServerPort
 	int port;
@@ -155,6 +161,10 @@ abstract class WorkerTestSupport {
 		return stat("/mock/fineract/stats", "debitRequests");
 	}
 
+	long refundRequests() {
+		return stat("/mock/fineract/stats", "refundRequests");
+	}
+
 	long paymentSubmissions() {
 		return stat("/mock/provider/stats", "submissionRequests");
 	}
@@ -172,6 +182,30 @@ abstract class WorkerTestSupport {
 			.body(Map.of("status", status, "sendCallback", sendCallback))
 			.retrieve()
 			.toBodilessEntity();
+	}
+
+	static String callbackBody(String eventId, String paymentReference, String status) {
+		return "{\"eventId\":\"" + eventId + "\",\"paymentReference\":\"" + paymentReference
+				+ "\",\"providerPaymentId\":\"PP1\",\"status\":\"" + status + "\",\"failureReason\":null}";
+	}
+
+	static String sign(String body) {
+		return Hashing.hmacSha256Hex(CALLBACK_SECRET, body.getBytes(StandardCharsets.UTF_8));
+	}
+
+	@SuppressWarnings("unchecked")
+	ResponseEntity<Map<String, Object>> postCallback(String body, String signature) {
+		return (ResponseEntity<Map<String, Object>>) (ResponseEntity<?>) this.client.post()
+			.uri("/api/v2/provider/events")
+			.contentType(MediaType.APPLICATION_JSON)
+			.headers((headers) -> {
+				if (signature != null) {
+					headers.set("X-Provider-Signature", signature);
+				}
+			})
+			.body(body.getBytes(StandardCharsets.UTF_8))
+			.retrieve()
+			.toEntity(Map.class);
 	}
 
 	private long stat(String path, String field) {

@@ -1,15 +1,12 @@
 package com.transferservice.transfer_processing_service.worker;
 
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 import com.transferservice.transfer_processing_service.callback.CallbackOutcome;
 import com.transferservice.transfer_processing_service.callback.ProviderCallback;
 import com.transferservice.transfer_processing_service.callback.ProviderCallbackRepository;
-import com.transferservice.transfer_processing_service.common.Hashing;
 import com.transferservice.transfer_processing_service.transfer.FinancialOperation;
 import com.transferservice.transfer_processing_service.transfer.TransferState;
 import com.transferservice.transfer_processing_service.transfer.api.TransferResponse;
@@ -17,8 +14,6 @@ import org.junit.jupiter.api.Test;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
-import org.springframework.http.ResponseEntity;
 import org.springframework.web.client.HttpClientErrorException;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -29,8 +24,6 @@ import static org.awaitility.Awaitility.await;
  * Provider callbacks delivered by the mock provider to the real callback endpoint.
  */
 class CallbackProcessingTest extends WorkerTestSupport {
-
-	static final String SECRET = "dev-callback-secret";
 
 	@Autowired
 	ProviderCallbackRepository callbacks;
@@ -144,30 +137,6 @@ class CallbackProcessingTest extends WorkerTestSupport {
 				SELECT count(*) FROM mock_provider.callbacks
 				WHERE payment_reference = :ref AND delivered_at IS NOT NULL
 				""").param("ref", "PAY-" + reference).query(Long.class).single();
-	}
-
-	private static String callbackBody(String eventId, String paymentReference, String status) {
-		return "{\"eventId\":\"" + eventId + "\",\"paymentReference\":\"" + paymentReference
-				+ "\",\"providerPaymentId\":\"PP1\",\"status\":\"" + status + "\",\"failureReason\":null}";
-	}
-
-	private static String sign(String body) {
-		return Hashing.hmacSha256Hex(SECRET, body.getBytes(StandardCharsets.UTF_8));
-	}
-
-	@SuppressWarnings("unchecked")
-	private ResponseEntity<Map<String, Object>> postCallback(String body, String signature) {
-		return (ResponseEntity<Map<String, Object>>) (ResponseEntity<?>) this.client.post()
-			.uri("/api/v2/provider/events")
-			.contentType(MediaType.APPLICATION_JSON)
-			.headers((headers) -> {
-				if (signature != null) {
-					headers.set("X-Provider-Signature", signature);
-				}
-			})
-			.body(body.getBytes(StandardCharsets.UTF_8))
-			.retrieve()
-			.toEntity(Map.class);
 	}
 
 }

@@ -110,6 +110,11 @@ class TransferProcessor {
 				yield pay(transfer, payment, owner, false);
 			}
 			case PAYMENT_PENDING -> pay(transfer, operationOf(transferId, FinancialOperation.Type.PAYMENT), owner, true);
+			case PAYMENT_FAILED -> {
+				Optional<FinancialOperation> refund = this.transitions.beginRefund(transferId, owner);
+				yield refund.isPresent() && refund(transfer, refund.get(), owner, false);
+			}
+			case REFUND_PENDING -> refund(transfer, operationOf(transferId, FinancialOperation.Type.REFUND), owner, true);
 			default -> false;
 		};
 	}
@@ -182,6 +187,38 @@ class TransferProcessor {
 			else {
 				this.transitions.recordPaymentRefused(transferId, owner, ex.code());
 			}
+			return false;
+		}
+	}
+
+	/**
+	 * Returns the debited amount to the source account. Same rules as the debit: a resumed
+	 * refund is looked up before it is resent, and always under the same reference.
+	 */
+	private boolean refund(Transfer transfer, FinancialOperation refund, String owner, boolean resumed) {
+		UUID transferId = transfer.getId();
+		try {
+			if (resumed) {
+				Optional<FineractOperation> existing = this.fineract.lookup(refund.getOperationReference());
+				if (existing.isPresent()) {
+					this.transitions.recordRefundOutcome(transferId, owner, existing.get(), "lookup");
+					return true;
+				}
+			}
+			FineractOperation result = this.fineract.refund(refund.getOperationReference(),
+					FinancialOperation.Type.DEBIT.referenceFor(transfer), refund.getAmount());
+			this.checkpoints.reached(Checkpoint.AFTER_REFUND_CALL, transferId);
+			this.transitions.recordRefundOutcome(transferId, owner, result, "response");
+			return true;
+		}
+		catch (FineractOutcomeUnknownException ex) {
+			this.transitions.recordRefundUnknown(transferId, owner, ex.getMessage());
+			return false;
+		}
+		catch (FineractRejectedException ex) {
+			// A refund that cannot be made is never silently dropped.
+			this.transitions.flagForReconciliation(transferId, owner, TransferState.REFUND_PENDING,
+					"Fineract refused refund " + refund.getOperationReference() + ": " + ex.code());
 			return false;
 		}
 	}
