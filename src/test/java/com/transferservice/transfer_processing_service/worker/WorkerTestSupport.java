@@ -46,7 +46,8 @@ import static org.awaitility.Awaitility.await;
 @Import(TestcontainersConfiguration.class)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
 		properties = { "fineract.read-timeout-ms=500", "provider.read-timeout-ms=500",
-				"mock.provider.slow-response-ms=1500", "worker.lease-seconds=2", "worker.retry.initial-ms=200",
+				"mock.provider.slow-response-ms=1500", "mock.provider.callback-delay-ms=100",
+				"mock.provider.delayed-callback-ms=1500", "worker.lease-seconds=2", "worker.retry.initial-ms=200",
 				"worker.retry.max-ms=1000", "worker.recovery.poll-ms=200" })
 abstract class WorkerTestSupport {
 

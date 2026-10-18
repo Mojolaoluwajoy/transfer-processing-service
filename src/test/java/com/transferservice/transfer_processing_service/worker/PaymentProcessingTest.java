@@ -87,7 +87,8 @@ class PaymentProcessingTest extends WorkerTestSupport {
 			.reached(eq(Checkpoint.AFTER_PAYMENT_CALL), any());
 		long submissionsBefore = paymentSubmissions();
 
-		TransferResponse transfer = accept();
+		// No callback, so the outcome can only come from the replacement worker's lookup.
+		TransferResponse transfer = accept("Invoice SIM:NO_CALLBACK");
 
 		awaitState(transfer.reference(), TransferState.COMPLETED);
 		TransferEvent requested = event(transfer.reference(), "PAYMENT_REQUESTED");

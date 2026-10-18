@@ -87,8 +87,10 @@ class TransferProcessor {
 			this.transfers.releaseLease(transferId, owner);
 		}
 		catch (LeaseLostException | ObjectOptimisticLockingFailureException ex) {
-			// Someone else owns the transfer now; leave their lease alone.
-			log.warn("Stopped processing transfer {}: {}", transferId, ex.getMessage());
+			// Another worker or a provider callback moved the transfer on. Releasing only
+			// matches our own owner token, so a newer worker's lease is left untouched.
+			log.info("Stopped processing transfer {}: {}", transferId, ex.getMessage());
+			this.transfers.releaseLease(transferId, owner);
 		}
 		// Any other exception propagates without releasing the lease, exactly like a crash:
 		// the lease expires and recovery resumes from the last committed state.

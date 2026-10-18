@@ -12,4 +12,6 @@ public interface FinancialOperationRepository extends JpaRepository<FinancialOpe
 
 	List<FinancialOperation> findByTransferIdOrderByIdAsc(UUID transferId);
 
+	Optional<FinancialOperation> findByOperationReference(String operationReference);
+
 }

@@ -5,7 +5,10 @@ import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
+import jakarta.persistence.LockModeType;
+
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.transaction.annotation.Transactional;
@@ -15,6 +18,11 @@ public interface TransferRepository extends JpaRepository<Transfer, UUID> {
 	Optional<Transfer> findByPartnerIdAndExternalReference(UUID partnerId, String externalReference);
 
 	Optional<Transfer> findByPartnerIdAndReference(UUID partnerId, String reference);
+
+	/** Loads the transfer with a row lock held until the surrounding transaction ends. */
+	@Lock(LockModeType.PESSIMISTIC_WRITE)
+	@Query("SELECT t FROM Transfer t WHERE t.id = :id")
+	Optional<Transfer> findByIdForUpdate(UUID id);
 
 	/**
 	 * Takes the processing lease if it is free or expired. Bumping the version means any
