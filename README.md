@@ -455,23 +455,81 @@ The database schema is owned by Liquibase (`src/main/resources/db/changelog`); H
 
 ## 11. Code map
 
+Packages are listed as they appear in the source tree (alphabetically), under
+`src/main/java/com/transferservice/transfer_processing_service/`.
+
 ```
-src/main/java/com/transferservice/transfer_processing_service/
-├── transfer/          Transfer, TransferState, FinancialOperation, TransferEvent, repositories,
-│   │                  TransferService (idempotent initiation), TransferCreator (accept transaction)
-│   └── api/           TransferController, request/response types, error mapping
-├── outbox/            OutboxMessage, OutboxRelay (confirms, SKIP LOCKED, backoff)
-├── messaging/         RabbitMQ topology (exchange, queue, dead-letter queue)
-├── worker/            TransferProcessor (lease, steps), TransferTransitions (fenced state changes),
-│                      TransferMessageListener, TransferRecovery, RetryPolicy, ProcessingCheckpoints
-├── callback/          ProviderCallbackController (HMAC), ProviderCallbackService (dedupe, apply, conflicts)
-├── reconciliation/    Operator view of flagged transfers
-├── integration/       FineractClient, ProviderClient (classify: definite rejection vs unknown outcome)
-├── partner/           Partner authentication and source-account authorization
-├── security/          Spring Security: API key and operator key filters, problem+json 401/403
-├── mock/fineract/     Mock Fineract (atomic debits, idempotent references, lookup, faults, stats)
-├── mock/provider/     Mock payment provider (SIM: scenarios, persisted signed callbacks, stats)
-└── common/            Hashing, scheduling
-src/main/resources/db/changelog/   Liquibase migrations (service and mock schemas, dev seed)
-src/test/java/…                    Integration tests (see section 4)
+transfer_processing_service/
+├── TransferProcessingServiceApplication.java
+├── callback/                   Provider callbacks
+│   ├── ProviderCallbackController   POST /api/v2/provider/events, HMAC signature check
+│   ├── ProviderCallbackService      store once by event id, apply under row lock, flag conflicts
+│   ├── ProviderCallback, ProviderCallbackRepository, ProviderCallbackPayload
+│   └── CallbackOutcome              APPLIED, CONSISTENT, CONFLICT, IGNORED, UNMATCHED, DUPLICATE
+├── common/
+│   ├── Hashing                      SHA-256 and HMAC-SHA256 helpers
+│   └── SchedulingConfiguration      @EnableScheduling
+├── integration/                Clients for external systems; each failure is a definite
+│   │                           rejection or an unknown outcome
+│   ├── fineract/                FineractClient, FineractOperation, FineractRejectedException,
+│   │                            FineractOutcomeUnknownException
+│   └── provider/                ProviderClient, ProviderPayment, ProviderRejectedException,
+│                                ProviderOutcomeUnknownException
+├── messaging/
+│   └── MessagingTopology            exchange, process queue, dead-letter queue
+├── mock/                       Stand-ins for external systems (reached only over HTTP)
+│   ├── MockApiException, MockApiExceptionHandler   shared problem+json errors
+│   ├── fineract/                MockFineractController, MockFineractService (atomic debit,
+│   │                            idempotent references, lookup), MockFineractFaults, MockFineractApi
+│   └── provider/                MockProviderController, MockProviderService, MockProviderScenario
+│                                (SIM: tokens), MockProviderCallbackSender (persisted, signed
+│                                callbacks), MockProviderApi
+├── outbox/
+│   ├── OutboxMessage, OutboxMessageRepository   SKIP LOCKED batch query
+│   └── OutboxRelay                  publisher confirms, mandatory routing, backoff
+├── partner/
+│   ├── PartnerAuthenticationService API key hash → active partner
+│   ├── PartnerAccess                source-account authorization
+│   └── PartnerPrincipal, SourceAccountNotPermittedException
+├── reconciliation/             Operator view of flagged transfers
+│   └── ReconciliationController, ReconciliationService, ReconciliationItem
+├── security/
+│   ├── SecurityConfiguration        path rules, stateless API
+│   ├── ApiKeyAuthenticationFilter, OperatorKeyAuthenticationFilter
+│   └── ProblemDetailSecurityHandler problem+json 401/403
+├── transfer/                   Domain model and initiation
+│   ├── Transfer, TransferState, FinancialOperation, TransferEvent, NewTransfer
+│   ├── TransferRepository (lease, recovery, row-lock queries), FinancialOperationRepository,
+│   │   TransferEventRepository
+│   ├── TransferService              idempotent initiation, status lookup
+│   ├── TransferCreator              accept transaction: transfer + audit event + outbox row
+│   ├── IdempotencyConflictException, TransferNotFoundException
+│   └── api/                     TransferController, CreateTransferRequest, TransferResponse,
+│                                TransferApiExceptionHandler
+└── worker/                     Asynchronous processing
+    ├── TransferProcessor            claim lease, run debit → payment → refund steps
+    ├── TransferTransitions          fenced, audited state changes
+    ├── TransferMessageListener      RabbitMQ entry point
+    ├── TransferRecovery             recovery poller
+    ├── RetryPolicy, LeaseLostException
+    └── ProcessingCheckpoints, NoOpProcessingCheckpoints   crash-simulation hook for tests
+```
+
+```
+src/main/resources/
+├── application.properties, application-dev.properties
+└── db/changelog/
+    ├── db.changelog-master.yaml
+    └── changes/                001-schemas … 007 (service + mock schemas), 008-dev-seed (dev only)
+
+src/test/java/com/transferservice/transfer_processing_service/
+├── TestcontainersConfiguration, ToxiproxyTestcontainersConfiguration, TestPartners, TestTransfers
+├── TransferProcessingServiceApplicationTests, TestTransferProcessingServiceApplication
+├── mock/fineract/MockFineractTest, mock/provider/MockProviderTest
+├── outbox/OutboxRelayTest       scenario 5 (Toxiproxy)
+├── security/SecurityTest
+├── transfer/TransferApiTest     scenario 1 (API), validation, idempotency, authorization
+└── worker/                      WorkerTestSupport (shared context), DebitProcessingTest,
+                                 PaymentProcessingTest, CallbackProcessingTest,
+                                 RefundProcessingTest, ReconciliationApiTest
 ```
