@@ -54,6 +54,17 @@ public class OutboxMessage {
 		return message;
 	}
 
+	public void markPublished(Instant now) {
+		this.publishedAt = now;
+		this.lastError = null;
+	}
+
+	public void markFailed(String error, Instant nextAttemptAt) {
+		this.attemptCount++;
+		this.lastError = (error != null && error.length() > 1000) ? error.substring(0, 1000) : error;
+		this.nextAttemptAt = nextAttemptAt;
+	}
+
 	public Long getId() {
 		return this.id;
 	}
