@@ -75,7 +75,7 @@ class SecurityTest {
 
 	@Test
 	void validKeyPassesAuthentication() {
-		// No transfer endpoint exists yet, so getting past security means a 404, not a 401.
+		// Getting past security reaches the controller, which reports an unknown transfer as 404.
 		assertStatus(this.partner.apiKey(), HttpStatus.NOT_FOUND);
 	}
 
