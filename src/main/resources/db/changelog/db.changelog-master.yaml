@@ -1,3 +1,9 @@
 # Master changelog: lists every migration in order.
 # Add new files under changes/ and include them here; never edit a changeset once applied.
-databaseChangeLog: []
+databaseChangeLog:
+  - include: { file: changes/001-schemas.sql, relativeToChangelogFile: true }
+  - include: { file: changes/002-partners.sql, relativeToChangelogFile: true }
+  - include: { file: changes/003-transfers.sql, relativeToChangelogFile: true }
+  - include: { file: changes/004-messaging.sql, relativeToChangelogFile: true }
+  - include: { file: changes/005-mock-fineract.sql, relativeToChangelogFile: true }
+  - include: { file: changes/006-mock-provider.sql, relativeToChangelogFile: true }
