@@ -3,7 +3,8 @@
 A Spring Boot service that accepts NGN transfers from authenticated partners, debits the source account in
 (mock) Fineract, pays out through a (mock) payment provider, and refunds confirmed failures. It is built so that
 timeouts, crashes, broker outages, concurrent workers, redelivered messages and duplicate or conflicting callbacks
-never produce a duplicate or lost financial effect.
+do not produce a duplicate or lost financial effect, given the integration capabilities described in
+[section 8](#8-if-real-integrations-lack-idempotency-or-reliable-lookup).
 
 **Stack:** Java 21, Spring Boot 4.1, PostgreSQL 17, RabbitMQ 4.1, Liquibase, Spring Security, JPA/Hibernate,
 Testcontainers (with Toxiproxy).
@@ -98,7 +99,10 @@ To reset everything: `docker compose down -v` (drops the database volume).
 
 ## 2. API
 
-All errors are `application/problem+json` with a machine-readable `code`.
+Errors from the endpoints below (authentication, validation, idempotency, authorization, not found, callback
+signature) are `application/problem+json` with a machine-readable `code`. Errors raised by Spring before a request
+reaches them, such as `405 Method Not Allowed` or an unsupported media type, use Spring Boot's default JSON error
+body. So do validation errors from the mocks.
 
 ### `POST /api/v2/transfers`: accept a transfer (partner)
 
@@ -140,7 +144,7 @@ redelivering. Bad or missing signature: `401`, nothing stored.
 
 ### `GET /api/v2/ops/reconciliation`: flagged transfers (operator)
 
-Requires `X-Operator-Key`. Lists up to 100 transfers with `reconciliationRequired`, oldest first, each with the audit
+Requires `X-Operator-Key`. Lists up to 100 transfers with `reconciliationRequired`, least recently updated first, each with the audit
 events that flagged it, its financial operations and every provider callback received for it.
 
 ---
@@ -314,7 +318,8 @@ exactly which external operation might have happened, and under which reference.
 - **Fencing.** Every transition re-reads the transfer, checks `lease_owner = me` and the expected state, and relies
   on JPA `@Version`: if another worker claimed the lease (bumping the version) after the check, the commit fails
   and the stale worker stops without writing.
-- **Callbacks vs workers.** The callback handler takes a `SELECT … FOR UPDATE` row lock instead of the lease. Its
+- **Callbacks vs workers.** The callback handler takes a row lock instead of the lease (JPA `PESSIMISTIC_WRITE`,
+  which Hibernate issues on PostgreSQL as `SELECT … FOR NO KEY UPDATE`; it blocks any concurrent update of the row). Its
   version bump means a worker about to save a late response fails its write: whichever lands first wins, and the
   other observes the settled state (`expected PAYMENT_PENDING but was COMPLETED` in the logs).
 - **Funds.** The available-balance check is Fineract's: a single `UPDATE accounts SET balance = balance - x WHERE
@@ -332,8 +337,9 @@ hot loop; the transfer itself is still recovered from database state.
 
 ### 6.5 Recovery
 
-- **Every non-terminal state carries a `next_attempt_at`.** Before an external call it is set to "after the lease
-  ends"; after an unresolved call, to a backoff time.
+- **Every non-terminal state carries a `next_attempt_at`**, unless the transfer has been flagged for reconciliation
+  (which deliberately stops automatic processing). Before an external call it is set to "after the lease ends";
+  after an unresolved call, to a backoff time.
 - **`TransferRecovery`** polls every second for transfers in an actionable state whose `next_attempt_at` has passed
   and whose lease is free or expired, and processes them. It runs on every instance; the lease makes that safe.
   Accepted transfers get a 30 s grace period for their message before recovery picks them up.
