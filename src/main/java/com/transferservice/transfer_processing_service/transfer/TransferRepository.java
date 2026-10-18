@@ -19,6 +19,8 @@ public interface TransferRepository extends JpaRepository<Transfer, UUID> {
 
 	Optional<Transfer> findByPartnerIdAndReference(UUID partnerId, String reference);
 
+	List<Transfer> findTop100ByReconciliationRequiredTrueOrderByUpdatedAtAsc();
+
 	/** Loads the transfer with a row lock held until the surrounding transaction ends. */
 	@Lock(LockModeType.PESSIMISTIC_WRITE)
 	@Query("SELECT t FROM Transfer t WHERE t.id = :id")

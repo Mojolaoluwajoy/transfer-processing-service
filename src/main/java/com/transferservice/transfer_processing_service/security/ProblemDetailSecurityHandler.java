@@ -28,8 +28,9 @@ class ProblemDetailSecurityHandler implements AuthenticationEntryPoint, AccessDe
 	@Override
 	public void commence(HttpServletRequest request, HttpServletResponse response, AuthenticationException ex)
 			throws IOException {
-		write(request, response, HttpStatus.UNAUTHORIZED, "UNAUTHENTICATED",
-				"A valid " + ApiKeyAuthenticationFilter.HEADER + " header is required");
+		write(request, response, HttpStatus.UNAUTHORIZED, "UNAUTHENTICATED", "A valid "
+				+ ApiKeyAuthenticationFilter.HEADER + " (or, for operator endpoints, "
+				+ OperatorKeyAuthenticationFilter.HEADER + ") header is required");
 	}
 
 	@Override

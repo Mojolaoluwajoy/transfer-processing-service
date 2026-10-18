@@ -3,6 +3,7 @@ package com.transferservice.transfer_processing_service.security;
 import com.transferservice.transfer_processing_service.partner.PartnerAuthenticationService;
 import tools.jackson.databind.json.JsonMapper;
 
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
@@ -15,7 +16,7 @@ class SecurityConfiguration {
 
 	@Bean
 	SecurityFilterChain apiSecurityFilterChain(HttpSecurity http, PartnerAuthenticationService partners,
-			JsonMapper jsonMapper) {
+			JsonMapper jsonMapper, @Value("${ops.operator-key-sha256:}") String operatorKeySha256) {
 		ProblemDetailSecurityHandler problems = new ProblemDetailSecurityHandler(jsonMapper);
 		http.csrf((csrf) -> csrf.disable())
 			.httpBasic((basic) -> basic.disable())
@@ -25,9 +26,12 @@ class SecurityConfiguration {
 			.sessionManagement((session) -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
 			.exceptionHandling((ex) -> ex.authenticationEntryPoint(problems).accessDeniedHandler(problems))
 			.addFilterBefore(new ApiKeyAuthenticationFilter(partners, problems), AnonymousAuthenticationFilter.class)
+			.addFilterBefore(new OperatorKeyAuthenticationFilter(operatorKeySha256, problems),
+					AnonymousAuthenticationFilter.class)
 			.authorizeHttpRequests((requests) -> requests
 				// Authenticated by HMAC signature in the callback handler, not by partner key.
 				.requestMatchers("/api/v2/provider/events").permitAll()
+				.requestMatchers("/api/v2/ops/**").hasRole("OPERATOR")
 				.requestMatchers("/api/v2/**").hasRole("PARTNER")
 				// The mocks stand in for external systems and would not ship with the service.
 				.requestMatchers("/mock/**").permitAll()

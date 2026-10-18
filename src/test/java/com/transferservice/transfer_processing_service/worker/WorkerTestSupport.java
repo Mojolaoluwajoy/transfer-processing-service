@@ -52,7 +52,9 @@ import static org.awaitility.Awaitility.await;
 		properties = { "fineract.read-timeout-ms=500", "provider.read-timeout-ms=500",
 				"mock.provider.slow-response-ms=1500", "mock.provider.callback-delay-ms=100",
 				"mock.provider.delayed-callback-ms=1500", "worker.lease-seconds=2", "worker.retry.initial-ms=200",
-				"worker.retry.max-ms=1000", "worker.recovery.poll-ms=200" })
+				"worker.retry.max-ms=1000", "worker.recovery.poll-ms=200",
+				// SHA-256 of "dev-operator-key"
+				"ops.operator-key-sha256=7eee78659ab50d4dd820f4242709d188809ca0249506edf83d70022973d5e2ca" })
 abstract class WorkerTestSupport {
 
 	static final String CALLBACK_SECRET = "dev-callback-secret";
