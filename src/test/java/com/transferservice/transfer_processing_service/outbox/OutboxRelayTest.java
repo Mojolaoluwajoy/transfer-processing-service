@@ -78,7 +78,7 @@ class OutboxRelayTest {
 		OutboxMessage message = awaitPublished(transfer.reference());
 
 		assertThat(message.getAttemptCount()).isZero();
-		awaitState(transfer.reference(), TransferState.DEBITED);
+		awaitState(transfer.reference(), TransferState.COMPLETED);
 	}
 
 	/** Mandatory scenario 5: RabbitMQ is unavailable after acceptance, and processing resumes when it returns. */
@@ -101,7 +101,7 @@ class OutboxRelayTest {
 
 		OutboxMessage published = awaitPublished(transfer.reference());
 		assertThat(published.getLastError()).isNull();
-		awaitState(transfer.reference(), TransferState.DEBITED);
+		awaitState(transfer.reference(), TransferState.COMPLETED);
 	}
 
 	private TransferResponse accept(String externalReference) {

@@ -11,7 +11,10 @@ public interface ProcessingCheckpoints {
 	enum Checkpoint {
 
 		/** Fineract answered the debit, but the worker has not saved the answer yet. */
-		AFTER_DEBIT_CALL
+		AFTER_DEBIT_CALL,
+
+		/** The provider answered the submission, but the worker has not saved the answer yet. */
+		AFTER_PAYMENT_CALL
 
 	}
 

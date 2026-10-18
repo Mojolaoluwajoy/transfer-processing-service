@@ -105,6 +105,14 @@ public class FinancialOperation {
 		this.lastError = truncate(error);
 	}
 
+	/** The external system acknowledged the operation but has not settled it yet. */
+	public void markAccepted(String externalId) {
+		this.attemptCount++;
+		this.status = Status.PENDING;
+		this.externalId = externalId;
+		this.lastError = null;
+	}
+
 	public void markSucceeded(String externalId) {
 		this.attemptCount++;
 		this.status = Status.SUCCEEDED;

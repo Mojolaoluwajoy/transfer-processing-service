@@ -9,6 +9,10 @@ import com.transferservice.transfer_processing_service.integration.fineract.Fine
 import com.transferservice.transfer_processing_service.integration.fineract.FineractOperation;
 import com.transferservice.transfer_processing_service.integration.fineract.FineractOutcomeUnknownException;
 import com.transferservice.transfer_processing_service.integration.fineract.FineractRejectedException;
+import com.transferservice.transfer_processing_service.integration.provider.ProviderClient;
+import com.transferservice.transfer_processing_service.integration.provider.ProviderOutcomeUnknownException;
+import com.transferservice.transfer_processing_service.integration.provider.ProviderPayment;
+import com.transferservice.transfer_processing_service.integration.provider.ProviderRejectedException;
 import com.transferservice.transfer_processing_service.transfer.FinancialOperation;
 import com.transferservice.transfer_processing_service.transfer.FinancialOperationRepository;
 import com.transferservice.transfer_processing_service.transfer.Transfer;
@@ -51,17 +55,20 @@ class TransferProcessor {
 
 	private final FineractClient fineract;
 
+	private final ProviderClient provider;
+
 	private final ProcessingCheckpoints checkpoints;
 
 	private final RetryPolicy retryPolicy;
 
 	TransferProcessor(TransferRepository transfers, FinancialOperationRepository operations,
-			TransferTransitions transitions, FineractClient fineract, ProcessingCheckpoints checkpoints,
-			RetryPolicy retryPolicy) {
+			TransferTransitions transitions, FineractClient fineract, ProviderClient provider,
+			ProcessingCheckpoints checkpoints, RetryPolicy retryPolicy) {
 		this.transfers = transfers;
 		this.operations = operations;
 		this.transitions = transitions;
 		this.fineract = fineract;
+		this.provider = provider;
 		this.checkpoints = checkpoints;
 		this.retryPolicy = retryPolicy;
 	}
@@ -95,7 +102,12 @@ class TransferProcessor {
 				FinancialOperation debit = this.transitions.beginDebit(transferId, owner);
 				yield debit(transfer, debit, owner, false);
 			}
-			case DEBIT_PENDING -> debit(transfer, debitOf(transferId), owner, true);
+			case DEBIT_PENDING -> debit(transfer, operationOf(transferId, FinancialOperation.Type.DEBIT), owner, true);
+			case DEBITED -> {
+				FinancialOperation payment = this.transitions.beginPayment(transferId, owner);
+				yield pay(transfer, payment, owner, false);
+			}
+			case PAYMENT_PENDING -> pay(transfer, operationOf(transferId, FinancialOperation.Type.PAYMENT), owner, true);
 			default -> false;
 		};
 	}
@@ -136,9 +148,44 @@ class TransferProcessor {
 		}
 	}
 
-	private FinancialOperation debitOf(UUID transferId) {
-		return this.operations.findByTransferIdAndOperationType(transferId, FinancialOperation.Type.DEBIT)
-			.orElseThrow();
+	/**
+	 * Submits the payment, or, when resumed, first asks the provider what happened to it.
+	 * Only an explicit SUCCEEDED or FAILED from the provider settles it; a timeout or
+	 * PROCESSING leaves it pending for a later look (or a callback).
+	 */
+	private boolean pay(Transfer transfer, FinancialOperation payment, String owner, boolean resumed) {
+		UUID transferId = transfer.getId();
+		try {
+			if (resumed) {
+				Optional<ProviderPayment> existing = this.provider.lookup(payment.getOperationReference());
+				if (existing.isPresent()) {
+					return this.transitions.recordPaymentOutcome(transferId, owner, existing.get(), "lookup");
+				}
+			}
+			ProviderPayment result = this.provider.submit(payment.getOperationReference(),
+					transfer.getDestinationAccount(), transfer.getDestinationBankCode(), transfer.getAmount(),
+					transfer.getCurrency(), transfer.getNarration());
+			this.checkpoints.reached(Checkpoint.AFTER_PAYMENT_CALL, transferId);
+			return this.transitions.recordPaymentOutcome(transferId, owner, result, "response");
+		}
+		catch (ProviderOutcomeUnknownException ex) {
+			this.transitions.recordPaymentUnknown(transferId, owner, ex.getMessage());
+			return false;
+		}
+		catch (ProviderRejectedException ex) {
+			if (ex.isReferenceConflict()) {
+				this.transitions.flagForReconciliation(transferId, owner, TransferState.PAYMENT_PENDING,
+						"Provider reports a conflicting payment for " + payment.getOperationReference());
+			}
+			else {
+				this.transitions.recordPaymentRefused(transferId, owner, ex.code());
+			}
+			return false;
+		}
+	}
+
+	private FinancialOperation operationOf(UUID transferId, FinancialOperation.Type type) {
+		return this.operations.findByTransferIdAndOperationType(transferId, type).orElseThrow();
 	}
 
 }

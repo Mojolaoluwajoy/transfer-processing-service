@@ -5,6 +5,7 @@ import java.util.Map;
 import java.util.UUID;
 
 import com.transferservice.transfer_processing_service.integration.fineract.FineractOperation;
+import com.transferservice.transfer_processing_service.integration.provider.ProviderPayment;
 import com.transferservice.transfer_processing_service.transfer.FinancialOperation;
 import com.transferservice.transfer_processing_service.transfer.FinancialOperationRepository;
 import com.transferservice.transfer_processing_service.transfer.Transfer;
@@ -65,7 +66,8 @@ class TransferTransitions {
 		if (result.committed()) {
 			debit.markSucceeded(result.transactionId());
 			transfer.moveTo(TransferState.DEBITED);
-			transfer.clearNextAttempt();
+			// Every non-terminal state keeps a recovery time, in case the worker dies before the next step.
+			transfer.scheduleNextAttempt(this.retryPolicy.afterLease());
 			detail.put("transactionId", result.transactionId());
 			audit(transfer, "DEBIT_CONFIRMED", TransferState.DEBIT_PENDING, owner, detail);
 		}
@@ -92,6 +94,86 @@ class TransferTransitions {
 		transfer.recordUnresolvedAttempt(this.retryPolicy.nextAttempt(transfer.getAttemptCount()));
 		audit(transfer, "DEBIT_OUTCOME_UNKNOWN", TransferState.DEBIT_PENDING, owner,
 				Map.of("operationReference", debit.getOperationReference(), "error", String.valueOf(error)));
+	}
+
+	/** Records the intent to pay before the provider is called. */
+	@Transactional
+	public FinancialOperation beginPayment(UUID transferId, String owner) {
+		Transfer transfer = leased(transferId, owner, TransferState.DEBITED);
+		FinancialOperation payment = this.operations
+			.save(FinancialOperation.pending(transfer, FinancialOperation.Type.PAYMENT));
+		transfer.moveTo(TransferState.PAYMENT_PENDING);
+		transfer.resetAttempts();
+		transfer.scheduleNextAttempt(this.retryPolicy.afterLease());
+		audit(transfer, "PAYMENT_REQUESTED", TransferState.DEBITED, owner,
+				Map.of("operationReference", payment.getOperationReference(), "amount",
+						payment.getAmount().toPlainString()));
+		return payment;
+	}
+
+	/**
+	 * Applies what the provider reported. Only SUCCEEDED or FAILED settle the payment;
+	 * PROCESSING keeps it pending and schedules another look.
+	 * @return true if the payment is now settled
+	 */
+	@Transactional
+	public boolean recordPaymentOutcome(UUID transferId, String owner, ProviderPayment result, String source) {
+		Transfer transfer = leased(transferId, owner, TransferState.PAYMENT_PENDING);
+		FinancialOperation payment = paymentOf(transfer);
+		Map<String, Object> detail = new HashMap<>();
+		detail.put("operationReference", payment.getOperationReference());
+		detail.put("providerPaymentId", String.valueOf(result.providerPaymentId()));
+		detail.put("source", source);
+		if (result.succeeded()) {
+			payment.markSucceeded(result.providerPaymentId());
+			transfer.moveTo(TransferState.COMPLETED);
+			audit(transfer, "PAYMENT_CONFIRMED", TransferState.PAYMENT_PENDING, owner, detail);
+			return true;
+		}
+		if (result.failed()) {
+			failPayment(transfer, payment, result.failureReason(), owner, detail);
+			return true;
+		}
+		boolean firstAcceptance = payment.getExternalId() == null;
+		payment.markAccepted(result.providerPaymentId());
+		transfer.recordUnresolvedAttempt(this.retryPolicy.nextAttempt(transfer.getAttemptCount()));
+		if (firstAcceptance) {
+			audit(transfer, "PAYMENT_ACCEPTED", TransferState.PAYMENT_PENDING, owner, detail);
+		}
+		return false;
+	}
+
+	/** The provider refused the submission outright: the payment definitely did not happen. */
+	@Transactional
+	public void recordPaymentRefused(UUID transferId, String owner, String reason) {
+		Transfer transfer = leased(transferId, owner, TransferState.PAYMENT_PENDING);
+		FinancialOperation payment = paymentOf(transfer);
+		Map<String, Object> detail = new HashMap<>();
+		detail.put("operationReference", payment.getOperationReference());
+		detail.put("source", "refusal");
+		failPayment(transfer, payment, reason, owner, detail);
+	}
+
+	/** No authoritative answer: the payment stays pending. A timeout is never treated as a failure. */
+	@Transactional
+	public void recordPaymentUnknown(UUID transferId, String owner, String error) {
+		Transfer transfer = leased(transferId, owner, TransferState.PAYMENT_PENDING);
+		FinancialOperation payment = paymentOf(transfer);
+		payment.markUnknown(error);
+		transfer.recordUnresolvedAttempt(this.retryPolicy.nextAttempt(transfer.getAttemptCount()));
+		audit(transfer, "PAYMENT_OUTCOME_UNKNOWN", TransferState.PAYMENT_PENDING, owner,
+				Map.of("operationReference", payment.getOperationReference(), "error", String.valueOf(error)));
+	}
+
+	private void failPayment(Transfer transfer, FinancialOperation payment, String reason, String owner,
+			Map<String, Object> detail) {
+		payment.markFailed(reason);
+		transfer.fail(TransferState.PAYMENT_FAILED, reason);
+		// A refund is now owed; keep the transfer on recovery's radar until it is made.
+		transfer.resetAttempts();
+		transfer.scheduleNextAttempt(this.retryPolicy.afterLease());
+		detail.put("reason", String.valueOf(reason));
+		audit(transfer, "PAYMENT_FAILED", TransferState.PAYMENT_PENDING, owner, detail);
 	}
 
 	/** Something only a human can resolve; stop automatic processing but keep the state. */
@@ -124,6 +206,11 @@ class TransferTransitions {
 
 	private FinancialOperation debitOf(Transfer transfer) {
 		return this.operations.findByTransferIdAndOperationType(transfer.getId(), FinancialOperation.Type.DEBIT)
+			.orElseThrow();
+	}
+
+	private FinancialOperation paymentOf(Transfer transfer) {
+		return this.operations.findByTransferIdAndOperationType(transfer.getId(), FinancialOperation.Type.PAYMENT)
 			.orElseThrow();
 	}
 

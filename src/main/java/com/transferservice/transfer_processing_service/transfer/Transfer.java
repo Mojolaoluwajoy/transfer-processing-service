@@ -116,6 +116,11 @@ public class Transfer {
 		this.nextAttemptAt = null;
 	}
 
+	/** Starts a new phase (e.g. payment after debit) with a fresh backoff. */
+	public void resetAttempts() {
+		this.attemptCount = 0;
+	}
+
 	public void recordUnresolvedAttempt(Instant retryAt) {
 		this.attemptCount++;
 		this.nextAttemptAt = retryAt;
