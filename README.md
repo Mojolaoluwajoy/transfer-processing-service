@@ -354,13 +354,14 @@ hot loop; the transfer itself is still recovered from database state.
 | `COMPLETED` | `CONSISTENT` | `CONFLICT`: flagged, state kept |
 | `PAYMENT_FAILED` / `REFUND_PENDING` / `REFUNDED` | `CONFLICT`: flagged (refund held if not started) | `CONSISTENT` |
 
-Non-final statuses are `IGNORED`; unknown references are stored as `UNMATCHED`. Every callback is kept verbatim
-(`payload` is the raw body), so for scenario 10 both facts survive: the committed refund and the provider's later
+Non-final statuses are `IGNORED`; unknown references are stored as `UNMATCHED`. Every stored callback keeps its full
+payload (the received body, stored as JSONB, so key order and whitespace are normalised), so for scenario 10 both facts survive: the committed refund and the provider's later
 success claim, linked by a `CALLBACK_CONFLICT` audit event.
 
 ### 6.7 Audit history
 
-`transfer_events` is append-only (`@Immutable`). Each row records the event type, from/to state, actor (`partner:<id>`,
+`transfer_events` is append-only by construction: the service only ever inserts into it, and the entity is
+Hibernate `@Immutable`, so no update or delete is issued. The database itself does not forbid updates. Each row records the event type, from/to state, actor (`partner:<id>`,
 `worker-…/<token>`, `provider-callback:<eventId>`) and JSON detail: operation references, Fineract transaction ids,
 provider payment ids, whether an outcome came from a `response`, `lookup` or `callback`, and errors from unresolved
 attempts. Together with `financial_operations`, `provider_callbacks` and `outbox_messages`, every financial operation
@@ -384,8 +385,10 @@ and state transition can be reconstructed.
 - **Transport:** TLS is assumed to be terminated in front of the service.
 - **Mocks are unauthenticated** and exposed at `/mock/**`. They stand in for external systems and must not be
   deployed with the service (see limitations).
-- The API is stateless: no sessions or cookies, so CSRF protection is disabled. All secrets in `application.properties`
-  and `application-dev.properties` are local-development defaults, overridable by environment variables.
+- The API is stateless: no sessions or cookies, so CSRF protection is disabled. Secrets in `application.properties` are
+  local-development defaults that read environment variables (`DB_PASSWORD`, `RABBITMQ_PASSWORD`,
+  `PROVIDER_CALLBACK_SECRET`, `OPS_OPERATOR_KEY_SHA256`). The `dev` profile hard-codes a known operator key hash, and
+  the demo partner keys live in the dev-only seed migration; neither applies outside that profile.
 
 ---
 
