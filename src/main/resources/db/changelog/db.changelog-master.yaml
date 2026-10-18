@@ -7,3 +7,4 @@ databaseChangeLog:
   - include: { file: changes/004-messaging.sql, relativeToChangelogFile: true }
   - include: { file: changes/005-mock-fineract.sql, relativeToChangelogFile: true }
   - include: { file: changes/006-mock-provider.sql, relativeToChangelogFile: true }
+  - include: { file: changes/007-widen-mock-provider-scenario.sql, relativeToChangelogFile: true }

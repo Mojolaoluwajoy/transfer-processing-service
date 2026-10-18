@@ -1,9 +1,13 @@
 package com.transferservice.transfer_processing_service.common;
 
 import java.nio.charset.StandardCharsets;
+import java.security.GeneralSecurityException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+
+import javax.crypto.Mac;
+import javax.crypto.spec.SecretKeySpec;
 
 public final class Hashing {
 
@@ -17,6 +21,17 @@ public final class Hashing {
 		}
 		catch (NoSuchAlgorithmException ex) {
 			throw new IllegalStateException("SHA-256 not available", ex);
+		}
+	}
+
+	public static String hmacSha256Hex(String secret, byte[] payload) {
+		try {
+			Mac mac = Mac.getInstance("HmacSHA256");
+			mac.init(new SecretKeySpec(secret.getBytes(StandardCharsets.UTF_8), "HmacSHA256"));
+			return HexFormat.of().formatHex(mac.doFinal(payload));
+		}
+		catch (GeneralSecurityException ex) {
+			throw new IllegalStateException("HmacSHA256 not available", ex);
 		}
 	}
 

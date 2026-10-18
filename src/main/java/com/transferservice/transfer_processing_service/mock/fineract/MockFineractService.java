@@ -7,6 +7,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import com.transferservice.transfer_processing_service.common.Hashing;
+import com.transferservice.transfer_processing_service.mock.MockApiException;
 import com.transferservice.transfer_processing_service.mock.fineract.MockFineractApi.AccountResponse;
 import com.transferservice.transfer_processing_service.mock.fineract.MockFineractApi.DebitRequest;
 import com.transferservice.transfer_processing_service.mock.fineract.MockFineractApi.OperationResponse;
@@ -81,14 +82,14 @@ class MockFineractService {
 		}
 
 		Operation original = findOperation(request.originalReference())
-			.orElseThrow(() -> MockFineractException.notFound("ORIGINAL_NOT_FOUND",
+			.orElseThrow(() -> MockApiException.notFound("ORIGINAL_NOT_FOUND",
 					"No operation " + request.originalReference()));
 		if (!"DEBIT".equals(original.operationType()) || !"COMMITTED".equals(original.status())) {
-			throw MockFineractException.unprocessable("ORIGINAL_NOT_REFUNDABLE",
+			throw MockApiException.unprocessable("ORIGINAL_NOT_REFUNDABLE",
 					"Only committed debits can be refunded");
 		}
 		if (original.amount().compareTo(amount) != 0) {
-			throw MockFineractException.unprocessable("AMOUNT_MISMATCH", "Refund must equal the debited amount");
+			throw MockApiException.unprocessable("AMOUNT_MISMATCH", "Refund must equal the debited amount");
 		}
 
 		int inserted;
@@ -110,7 +111,7 @@ class MockFineractService {
 		}
 		catch (DuplicateKeyException ex) {
 			// The partial unique index allows one refund per debit, whatever reference it uses.
-			throw MockFineractException.conflict("ALREADY_REFUNDED",
+			throw MockApiException.conflict("ALREADY_REFUNDED",
 					"Debit " + request.originalReference() + " already has a refund");
 		}
 		if (inserted == 0) {
@@ -128,7 +129,7 @@ class MockFineractService {
 	@Transactional(readOnly = true)
 	public OperationResponse getOperation(String operationReference) {
 		return findOperation(operationReference).map((op) -> toResponse(op, false))
-			.orElseThrow(() -> MockFineractException.notFound("OPERATION_NOT_FOUND",
+			.orElseThrow(() -> MockApiException.notFound("OPERATION_NOT_FOUND",
 					"No operation " + operationReference));
 	}
 
@@ -151,7 +152,7 @@ class MockFineractService {
 			.param("account", accountNumber)
 			.query(AccountResponse.class)
 			.optional()
-			.orElseThrow(() -> MockFineractException.notFound("ACCOUNT_NOT_FOUND", "No account " + accountNumber));
+			.orElseThrow(() -> MockApiException.notFound("ACCOUNT_NOT_FOUND", "No account " + accountNumber));
 	}
 
 	@Transactional(readOnly = true)
@@ -167,7 +168,7 @@ class MockFineractService {
 
 	private OperationResponse replay(Operation existing, String requestHash) {
 		if (!existing.requestHash().equals(requestHash)) {
-			throw MockFineractException.conflict("REFERENCE_CONFLICT",
+			throw MockApiException.conflict("REFERENCE_CONFLICT",
 					"Operation reference " + existing.operationReference() + " was used for a different request");
 		}
 		return toResponse(existing, true);
