@@ -1,0 +1,3 @@
+# Master changelog: lists every migration in order.
+# Add new files under changes/ and include them here; never edit a changeset once applied.
+databaseChangeLog: []
