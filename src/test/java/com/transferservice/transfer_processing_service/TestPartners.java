@@ -1,5 +1,6 @@
 package com.transferservice.transfer_processing_service;
 
+import java.math.BigDecimal;
 import java.util.UUID;
 
 import com.transferservice.transfer_processing_service.common.Hashing;
@@ -37,6 +38,14 @@ public final class TestPartners {
 				.update();
 		}
 		return new TestPartner(partnerId, apiKey);
+	}
+
+	/** Creates or resets an account in the mock Fineract ledger. */
+	public static void fund(JdbcClient jdbc, String accountNumber, String balance) {
+		jdbc.sql("""
+				INSERT INTO mock_fineract.accounts (account_number, available_balance) VALUES (:account, :balance)
+				ON CONFLICT (account_number) DO UPDATE SET available_balance = :balance
+				""").param("account", accountNumber).param("balance", new BigDecimal(balance)).update();
 	}
 
 	public record TestPartner(UUID id, String apiKey) {

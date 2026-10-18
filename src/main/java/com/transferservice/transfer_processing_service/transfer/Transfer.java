@@ -73,9 +73,13 @@ public class Transfer {
 	protected Transfer() {
 	}
 
+	/**
+	 * @param recoverAfter when recovery may pick the transfer up if its RabbitMQ message has
+	 * not been processed by then
+	 */
 	public static Transfer received(UUID partnerId, String externalReference, String requestHash,
 			String sourceAccount, String destinationAccount, String destinationBankCode, BigDecimal amount,
-			String currency, String narration, Instant now) {
+			String currency, String narration, Instant now, Instant recoverAfter) {
 		Transfer transfer = new Transfer();
 		transfer.id = UUID.randomUUID();
 		transfer.reference = "TRF" + transfer.id.toString().replace("-", "").substring(0, 20).toUpperCase();
@@ -89,10 +93,41 @@ public class Transfer {
 		transfer.currency = currency;
 		transfer.narration = narration;
 		transfer.state = TransferState.RECEIVED;
-		transfer.nextAttemptAt = now;
+		transfer.nextAttemptAt = recoverAfter;
 		transfer.createdAt = now;
 		transfer.updatedAt = now;
 		return transfer;
+	}
+
+	/** Moves to a new state; the caller is responsible for checking the transition is legal. */
+	public void moveTo(TransferState next) {
+		this.state = next;
+		if (next.isTerminal()) {
+			this.nextAttemptAt = null;
+		}
+	}
+
+	/** When recovery should next look at this transfer if nothing else moves it on. */
+	public void scheduleNextAttempt(Instant at) {
+		this.nextAttemptAt = at;
+	}
+
+	public void clearNextAttempt() {
+		this.nextAttemptAt = null;
+	}
+
+	public void recordUnresolvedAttempt(Instant retryAt) {
+		this.attemptCount++;
+		this.nextAttemptAt = retryAt;
+	}
+
+	public void fail(TransferState failedState, String reason) {
+		moveTo(failedState);
+		this.failureReason = reason;
+	}
+
+	public void flagForReconciliation() {
+		this.reconciliationRequired = true;
 	}
 
 	@PreUpdate

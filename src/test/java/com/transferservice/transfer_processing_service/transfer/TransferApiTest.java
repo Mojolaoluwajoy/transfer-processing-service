@@ -75,8 +75,11 @@ class TransferApiTest {
 		assertThat(response.getHeaders().getLocation()).hasToString("/api/v2/transfers/" + body.reference());
 
 		Transfer transfer = this.transfers.findByPartnerIdAndReference(this.partner.id(), body.reference()).orElseThrow();
-		assertThat(this.events.findByTransferIdOrderByIdAsc(transfer.getId())).singleElement()
-			.satisfies((event) -> assertThat(event.getToState()).isEqualTo(TransferState.RECEIVED));
+		// The worker may already have moved the transfer on; acceptance is always the first event.
+		assertThat(this.events.findByTransferIdOrderByIdAsc(transfer.getId())).first().satisfies((event) -> {
+			assertThat(event.getEventType()).isEqualTo("TRANSFER_ACCEPTED");
+			assertThat(event.getToState()).isEqualTo(TransferState.RECEIVED);
+		});
 		assertThat(this.outbox.findByAggregateId(transfer.getId())).singleElement()
 			.satisfies((message) -> assertThat(message.getPayload()).containsEntry("reference", body.reference()));
 	}
@@ -88,7 +91,7 @@ class TransferApiTest {
 		TransferResponse fetched = get(this.partner, created.reference());
 
 		assertThat(fetched.reference()).isEqualTo(created.reference());
-		assertThat(fetched.state()).isEqualTo("RECEIVED");
+		assertThat(fetched.externalReference()).isEqualTo("merchant-000002");
 	}
 
 	@Test
@@ -217,7 +220,9 @@ class TransferApiTest {
 			.query(Long.class)
 			.single()).isEqualTo(1);
 		assertThat(this.outbox.findByAggregateId(transfer.getId())).hasSize(1);
-		assertThat(this.events.findByTransferIdOrderByIdAsc(transfer.getId())).hasSize(1);
+		assertThat(this.events.findByTransferIdOrderByIdAsc(transfer.getId()))
+			.filteredOn((event) -> event.getEventType().equals("TRANSFER_ACCEPTED"))
+			.hasSize(1);
 	}
 
 	private Map<String, Object> request(String externalReference) {

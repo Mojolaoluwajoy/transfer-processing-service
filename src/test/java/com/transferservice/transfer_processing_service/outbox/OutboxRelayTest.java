@@ -7,16 +7,15 @@ import com.transferservice.transfer_processing_service.TestPartners;
 import com.transferservice.transfer_processing_service.TestPartners.TestPartner;
 import com.transferservice.transfer_processing_service.TestTransfers;
 import com.transferservice.transfer_processing_service.ToxiproxyTestcontainersConfiguration;
-import com.transferservice.transfer_processing_service.messaging.MessagingTopology;
+import com.transferservice.transfer_processing_service.transfer.Transfer;
 import com.transferservice.transfer_processing_service.transfer.TransferRepository;
+import com.transferservice.transfer_processing_service.transfer.TransferState;
 import com.transferservice.transfer_processing_service.transfer.api.TransferResponse;
 import eu.rekawek.toxiproxy.Proxy;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import org.springframework.amqp.core.Message;
-import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.web.server.LocalServerPort;
@@ -29,9 +28,13 @@ import org.springframework.web.client.RestClient;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.awaitility.Awaitility.await;
 
+/**
+ * Recovery's grace period is set far beyond the test duration, so any transfer that gets
+ * processed here was processed because its RabbitMQ message was published and consumed.
+ */
 @Import(ToxiproxyTestcontainersConfiguration.class)
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-		properties = "outbox.relay.max-backoff-ms=1000")
+		properties = { "outbox.relay.max-backoff-ms=1000", "worker.recovery.grace-ms=600000" })
 class OutboxRelayTest {
 
 	@LocalServerPort
@@ -47,9 +50,6 @@ class OutboxRelayTest {
 	OutboxMessageRepository outbox;
 
 	@Autowired
-	RabbitTemplate rabbit;
-
-	@Autowired
 	Proxy rabbitProxy;
 
 	RestClient client;
@@ -63,6 +63,7 @@ class OutboxRelayTest {
 		this.client = RestClient.builder().baseUrl("http://localhost:" + this.port).build();
 		this.sourceAccount = TestTransfers.randomAccount();
 		this.partner = TestPartners.create(this.jdbc, this.sourceAccount);
+		TestPartners.fund(this.jdbc, this.sourceAccount, "100000.00");
 	}
 
 	@AfterEach
@@ -71,20 +72,18 @@ class OutboxRelayTest {
 	}
 
 	@Test
-	void acceptedTransferIsPublishedWithConfirm() {
+	void acceptedTransferIsPublishedAndProcessed() {
 		TransferResponse transfer = accept("relay-1");
 
 		OutboxMessage message = awaitPublished(transfer.reference());
 
-		Message delivered = receiveFor(transfer.reference());
-		assertThat(delivered.getMessageProperties().getMessageId()).isEqualTo("outbox-" + message.getId());
-		assertThat(delivered.getMessageProperties().getType()).isEqualTo("TRANSFER_ACCEPTED");
 		assertThat(message.getAttemptCount()).isZero();
+		awaitState(transfer.reference(), TransferState.DEBITED);
 	}
 
-	/** Mandatory scenario 5 (publishing half): RabbitMQ is unavailable after acceptance. */
+	/** Mandatory scenario 5: RabbitMQ is unavailable after acceptance, and processing resumes when it returns. */
 	@Test
-	void brokerOutageAfterAcceptanceLosesNothingAndPublishingResumes() throws Exception {
+	void brokerOutageAfterAcceptanceLosesNothingAndProcessingResumes() throws Exception {
 		this.rabbitProxy.disable();
 
 		// Acceptance does not depend on the broker: the transfer and its outbox row commit together.
@@ -96,12 +95,13 @@ class OutboxRelayTest {
 			assertThat(pending.getAttemptCount()).isGreaterThanOrEqualTo(2);
 			assertThat(pending.getLastError()).isNotBlank();
 		});
+		assertThat(transfer(transfer.reference()).getState()).isEqualTo(TransferState.RECEIVED);
 
 		this.rabbitProxy.enable();
 
 		OutboxMessage published = awaitPublished(transfer.reference());
 		assertThat(published.getLastError()).isNull();
-		assertThat(receiveFor(transfer.reference())).isNotNull();
+		awaitState(transfer.reference(), TransferState.DEBITED);
 	}
 
 	private TransferResponse accept(String externalReference) {
@@ -111,9 +111,12 @@ class OutboxRelayTest {
 		return response.getBody();
 	}
 
+	private Transfer transfer(String reference) {
+		return this.transfers.findByPartnerIdAndReference(this.partner.id(), reference).orElseThrow();
+	}
+
 	private OutboxMessage outboxFor(String reference) {
-		UUID transferId = this.transfers.findByPartnerIdAndReference(this.partner.id(), reference).orElseThrow().getId();
-		return this.outbox.findByAggregateId(transferId).getFirst();
+		return this.outbox.findByAggregateId(transfer(reference).getId()).getFirst();
 	}
 
 	private OutboxMessage awaitPublished(String reference) {
@@ -121,16 +124,8 @@ class OutboxRelayTest {
 		return outboxFor(reference);
 	}
 
-	/** Drains the process queue until the message for this transfer arrives. */
-	private Message receiveFor(String reference) {
-		long deadline = System.currentTimeMillis() + 10_000;
-		while (System.currentTimeMillis() < deadline) {
-			Message message = this.rabbit.receive(MessagingTopology.PROCESS_QUEUE, 1000);
-			if (message != null && new String(message.getBody()).contains(reference)) {
-				return message;
-			}
-		}
-		throw new AssertionError("No message for " + reference + " on " + MessagingTopology.PROCESS_QUEUE);
+	private void awaitState(String reference, TransferState state) {
+		await().atMost(Duration.ofSeconds(30)).until(() -> transfer(reference).getState() == state);
 	}
 
 }
