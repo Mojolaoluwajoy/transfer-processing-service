@@ -19,10 +19,16 @@ import tools.jackson.databind.json.JsonMapper;
 
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.core.Ordered;
+import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.client.JdkClientHttpRequestFactory;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -35,7 +41,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.awaitility.Awaitility.await;
 
-@Import({ TestcontainersConfiguration.class, MockProviderTest.CallbackReceiver.class })
+@Import({ TestcontainersConfiguration.class, MockProviderTest.CallbackReceiver.class,
+		MockProviderTest.CallbackReceiverSecurity.class })
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = {
 		"mock.provider.callback-url=http://localhost:${local.server.port}/test/provider-callbacks",
 		"mock.provider.callback-delay-ms=100", "mock.provider.delayed-callback-ms=1500",
@@ -203,6 +210,20 @@ class MockProviderTest {
 				HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build());
 		factory.setReadTimeout(readTimeout);
 		return RestClient.builder().baseUrl("http://localhost:" + this.port).requestFactory(factory).build();
+	}
+
+	@TestConfiguration(proxyBeanMethods = false)
+	static class CallbackReceiverSecurity {
+
+		@Bean
+		@Order(Ordered.HIGHEST_PRECEDENCE)
+		SecurityFilterChain testCallbackReceiverChain(HttpSecurity http) {
+			return http.securityMatcher("/test/**")
+				.csrf((csrf) -> csrf.disable())
+				.authorizeHttpRequests((requests) -> requests.anyRequest().permitAll())
+				.build();
+		}
+
 	}
 
 	@RestController
