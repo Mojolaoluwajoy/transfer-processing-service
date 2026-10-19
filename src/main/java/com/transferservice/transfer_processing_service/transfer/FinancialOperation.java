@@ -109,14 +109,14 @@ public class FinancialOperation {
 	public void markAccepted(String externalId) {
 		this.attemptCount++;
 		this.status = Status.PENDING;
-		this.externalId = externalId;
+		recordExternalId(externalId);
 		this.lastError = null;
 	}
 
 	public void markSucceeded(String externalId) {
 		this.attemptCount++;
 		this.status = Status.SUCCEEDED;
-		this.externalId = externalId;
+		recordExternalId(externalId);
 		this.lastError = null;
 	}
 
@@ -124,6 +124,13 @@ public class FinancialOperation {
 		this.attemptCount++;
 		this.status = Status.FAILED;
 		this.lastError = truncate(reason);
+	}
+
+	/** Keeps an id already recorded if a later message omits it. */
+	private void recordExternalId(String externalId) {
+		if (externalId != null) {
+			this.externalId = externalId;
+		}
 	}
 
 	@PreUpdate

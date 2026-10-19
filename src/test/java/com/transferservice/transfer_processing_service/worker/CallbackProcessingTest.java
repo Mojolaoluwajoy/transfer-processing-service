@@ -108,6 +108,22 @@ class CallbackProcessingTest extends WorkerTestSupport {
 	}
 
 	@Test
+	void callbackWithoutProviderPaymentIdKeepsTheRecordedOne() {
+		TransferResponse transfer = accept("Invoice SIM:PENDING");
+		awaitEvent(transfer.reference(), "PAYMENT_ACCEPTED");
+		String recordedId = operation(transfer.reference(), FinancialOperation.Type.PAYMENT).getExternalId();
+		assertThat(recordedId).isNotBlank();
+
+		String body = "{\"eventId\":\"EVT-" + UUID.randomUUID() + "\",\"paymentReference\":\"PAY-"
+				+ transfer.reference() + "\",\"status\":\"SUCCEEDED\"}";
+		assertThat(postCallback(body, sign(body)).getBody()).containsEntry("outcome", "APPLIED");
+
+		assertThat(transfer(transfer.reference()).getState()).isEqualTo(TransferState.COMPLETED);
+		assertThat(operation(transfer.reference(), FinancialOperation.Type.PAYMENT).getExternalId())
+			.isEqualTo(recordedId);
+	}
+
+	@Test
 	void repeatedEventIdIsReportedAsDuplicate() {
 		String body = callbackBody("EVT-" + UUID.randomUUID(), "PAY-UNKNOWN-" + UUID.randomUUID(), "SUCCEEDED");
 
