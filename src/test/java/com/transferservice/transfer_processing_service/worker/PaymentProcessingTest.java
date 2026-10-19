@@ -1,11 +1,16 @@
 package com.transferservice.transfer_processing_service.worker;
 
+import com.transferservice.transfer_processing_service.messaging.MessagingTopology;
 import com.transferservice.transfer_processing_service.transfer.FinancialOperation;
+import com.transferservice.transfer_processing_service.transfer.Transfer;
 import com.transferservice.transfer_processing_service.transfer.TransferEvent;
 import com.transferservice.transfer_processing_service.transfer.TransferState;
 import com.transferservice.transfer_processing_service.transfer.api.TransferResponse;
 import com.transferservice.transfer_processing_service.worker.ProcessingCheckpoints.Checkpoint;
 import org.junit.jupiter.api.Test;
+
+import org.springframework.amqp.core.MessageBuilder;
+import org.springframework.amqp.core.MessageProperties;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -99,6 +104,30 @@ class PaymentProcessingTest extends WorkerTestSupport {
 		assertThat(confirmed.getActor()).isNotEqualTo(requested.getActor());
 		assertThat(paymentSubmissions() - submissionsBefore).isEqualTo(1);
 		assertThat(providerPayments(transfer.reference())).isEqualTo(1);
+	}
+
+	/**
+	 * A transfer flagged for reconciliation (as after a 409 reference conflict, which also
+	 * clears its retry time) must not be moved on automatically, even by a redelivered message.
+	 */
+	@Test
+	void flaggedPendingTransferIsNotProcessedByRedeliveredMessage() throws Exception {
+		TransferResponse transfer = accept("Invoice SIM:PENDING");
+		awaitEvent(transfer.reference(), "PAYMENT_ACCEPTED");
+		Transfer stored = transfer(transfer.reference());
+		this.jdbc.sql("UPDATE transfers SET reconciliation_required = TRUE, next_attempt_at = NULL WHERE id = :id")
+			.param("id", stored.getId())
+			.update();
+		resolvePayment(transfer.reference(), "SUCCEEDED", false);
+
+		this.rabbit.send(MessagingTopology.EXCHANGE, MessagingTopology.PROCESS_ROUTING_KEY,
+				MessageBuilder.withBody(("{\"transferId\":\"" + stored.getId() + "\"}").getBytes())
+					.setContentType(MessageProperties.CONTENT_TYPE_JSON)
+					.build());
+
+		Thread.sleep(2000);
+		assertThat(transfer(transfer.reference()).getState()).isEqualTo(TransferState.PAYMENT_PENDING);
+		assertThat(eventTypes(transfer.reference())).doesNotContain("PAYMENT_CONFIRMED");
 	}
 
 	@Test

@@ -99,6 +99,11 @@ class TransferProcessor {
 	/** Performs the next step. Returns true if there may be another step to take now. */
 	private boolean advance(UUID transferId, String owner) {
 		Transfer transfer = this.transfers.findById(transferId).orElseThrow();
+		if (transfer.isReconciliationRequired() && transfer.getState() != TransferState.REFUND_PENDING) {
+			// Flagged for a human: a duplicate or redelivered message must not move it on. A
+			// refund already under way is the exception; it is finished so money is not left in limbo.
+			return false;
+		}
 		return switch (transfer.getState()) {
 			case RECEIVED -> {
 				FinancialOperation debit = this.transitions.beginDebit(transferId, owner);
