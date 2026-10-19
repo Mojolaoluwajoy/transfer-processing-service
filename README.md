@@ -278,6 +278,9 @@ when facts conflict or automation must stop:
 | SUCCEEDED callback while `PAYMENT_FAILED` (refund not started) | `PAYMENT_FAILED` | **Refund held**: refunding could pay out twice |
 | Fineract refuses a refund, or a reference is bound to a different request (409) | unchanged | Stopped |
 
+A flagged transfer is never moved on automatically, not even by a duplicate or redelivered message. The one
+exception is a refund already under way, which is finished so the money is not left in limbo.
+
 ---
 
 ## 6. How it works
