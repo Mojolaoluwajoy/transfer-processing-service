@@ -228,7 +228,7 @@ scenarios take seconds. The broker outage uses a Toxiproxy container between the
 | 4 | Worker stops after the debit, before saving; a replacement recovers | `DebitProcessingTest.workerCrashAfterDebitIsRecoveredByReplacementWorker` |
 | 5 | RabbitMQ unavailable after acceptance; processing resumes when it returns | `OutboxRelayTest.brokerOutageAfterAcceptanceLosesNothingAndProcessingResumes` |
 | 6 | Callback arrives before the submission response is saved | `CallbackProcessingTest.callbackArrivingBeforeSubmissionResponseSettlesPaymentOnce` |
-| 7 | Duplicate callbacks and redelivered messages create no extra debits, payments or refunds | `CallbackProcessingTest.duplicateCallbacksCreateNoAdditionalEffects`, `DebitProcessingTest.redeliveredMessagesCreateNoAdditionalEffects` |
+| 7 | Duplicate callbacks and redelivered messages create no extra debits, payments or refunds | `CallbackProcessingTest.duplicateCallbacksCreateNoAdditionalEffects`, `DebitProcessingTest.redeliveredMessagesCreateNoAdditionalEffects`, `RefundProcessingTest.duplicateCallbacksAndRedeliveredMessagesCreateNoAdditionalRefunds` |
 | 8 | Provider timeout leaves the payment unresolved until authoritative evidence | `PaymentProcessingTest.providerTimeoutLeavesPaymentUnresolvedUntilEvidence` |
 | 9 | A confirmed failure produces one refund despite concurrent recovery workers | `RefundProcessingTest.confirmedFailureProducesOneRefundDespiteConcurrentRecoveryWorkers` |
 | 10 | Success callback after a completed refund preserves both facts and flags the conflict | `RefundProcessingTest.successCallbackAfterCompletedRefundPreservesBothFactsAndFlagsConflict` |
