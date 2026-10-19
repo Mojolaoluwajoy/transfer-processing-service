@@ -3,6 +3,7 @@ package com.transferservice.transfer_processing_service.callback;
 import java.time.Instant;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.UUID;
 
 import com.transferservice.transfer_processing_service.transfer.FinancialOperation;
 import com.transferservice.transfer_processing_service.transfer.FinancialOperationRepository;
@@ -55,10 +56,10 @@ public class ProviderCallbackService {
 	}
 
 	private CallbackOutcome apply(ProviderCallbackPayload callback) {
-		FinancialOperation payment = this.operations.findByOperationReference(callback.paymentReference())
-			.filter((op) -> op.getOperationType() == FinancialOperation.Type.PAYMENT)
+		UUID transferId = this.operations
+			.findTransferIdByReference(callback.paymentReference(), FinancialOperation.Type.PAYMENT)
 			.orElse(null);
-		if (payment == null) {
+		if (transferId == null) {
 			return CallbackOutcome.UNMATCHED;
 		}
 		boolean succeeded = "SUCCEEDED".equals(callback.status());
@@ -67,7 +68,12 @@ public class ProviderCallbackService {
 			return CallbackOutcome.IGNORED;
 		}
 
-		Transfer transfer = this.transfers.findByIdForUpdate(payment.getTransferId()).orElseThrow();
+		// Lock first, then read the payment: a worker that updated it a moment ago has
+		// committed by the time we hold the lock, so we never modify a stale copy.
+		Transfer transfer = this.transfers.findByIdForUpdate(transferId).orElseThrow();
+		FinancialOperation payment = this.operations
+			.findByTransferIdAndOperationType(transferId, FinancialOperation.Type.PAYMENT)
+			.orElseThrow();
 		String actor = "provider-callback:" + callback.eventId();
 		Map<String, Object> detail = new HashMap<>();
 		detail.put("eventId", callback.eventId());
