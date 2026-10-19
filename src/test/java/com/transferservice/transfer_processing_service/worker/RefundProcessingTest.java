@@ -6,12 +6,15 @@ import java.util.UUID;
 import com.transferservice.transfer_processing_service.callback.CallbackOutcome;
 import com.transferservice.transfer_processing_service.callback.ProviderCallback;
 import com.transferservice.transfer_processing_service.callback.ProviderCallbackRepository;
+import com.transferservice.transfer_processing_service.messaging.MessagingTopology;
 import com.transferservice.transfer_processing_service.transfer.FinancialOperation;
 import com.transferservice.transfer_processing_service.transfer.TransferState;
 import com.transferservice.transfer_processing_service.transfer.api.TransferResponse;
 import com.transferservice.transfer_processing_service.worker.ProcessingCheckpoints.Checkpoint;
 import org.junit.jupiter.api.Test;
 
+import org.springframework.amqp.core.MessageBuilder;
+import org.springframework.amqp.core.MessageProperties;
 import org.springframework.beans.factory.annotation.Autowired;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -73,6 +76,41 @@ class RefundProcessingTest extends WorkerTestSupport {
 		// The refund was sent once; every recovery learned its outcome by lookup.
 		assertThat(refundRequests() - refundCallsBefore).isEqualTo(1);
 		assertThat(event(transfer.reference(), "REFUND_CONFIRMED").getDetail()).containsEntry("source", "lookup");
+		assertThat(eventTypes(transfer.reference())).containsOnlyOnce("REFUND_REQUESTED", "REFUND_CONFIRMED");
+		assertThat(balance(this.sourceAccount)).isEqualByComparingTo("100000.00");
+	}
+
+	/**
+	 * Mandatory scenario 7 (refund half): duplicate failure callbacks and redelivered messages
+	 * on a refunded transfer create no additional debits, payments or refunds.
+	 */
+	@Test
+	void duplicateCallbacksAndRedeliveredMessagesCreateNoAdditionalRefunds() throws Exception {
+		long refundCallsBefore = refundRequests();
+		long debitCallsBefore = debitRequests();
+		long submissionsBefore = paymentSubmissions();
+
+		TransferResponse transfer = accept("Invoice SIM:FAIL SIM:DUPLICATE_CALLBACKS");
+		awaitState(transfer.reference(), TransferState.REFUNDED);
+		await().atMost(Duration.ofSeconds(10)).until(() -> this.jdbc.sql("""
+				SELECT count(*) FROM mock_provider.callbacks WHERE payment_reference = :ref AND delivered_at IS NOT NULL
+				""").param("ref", "PAY-" + transfer.reference()).query(Long.class).single() == 3);
+		UUID transferId = transfer(transfer.reference()).getId();
+		for (int i = 0; i < 5; i++) {
+			this.rabbit.send(MessagingTopology.EXCHANGE, MessagingTopology.PROCESS_ROUTING_KEY,
+					MessageBuilder.withBody(("{\"transferId\":\"" + transferId + "\"}").getBytes())
+						.setContentType(MessageProperties.CONTENT_TYPE_JSON)
+						.build());
+		}
+		Thread.sleep(1500);
+
+		assertThat(transfer(transfer.reference()).getState()).isEqualTo(TransferState.REFUNDED);
+		assertThat(committedRefunds(transfer.reference())).isEqualTo(1);
+		assertThat(committedDebits(this.sourceAccount)).isEqualTo(1);
+		assertThat(providerPayments(transfer.reference())).isEqualTo(1);
+		assertThat(refundRequests() - refundCallsBefore).isEqualTo(1);
+		assertThat(debitRequests() - debitCallsBefore).isEqualTo(1);
+		assertThat(paymentSubmissions() - submissionsBefore).isEqualTo(1);
 		assertThat(eventTypes(transfer.reference())).containsOnlyOnce("REFUND_REQUESTED", "REFUND_CONFIRMED");
 		assertThat(balance(this.sourceAccount)).isEqualByComparingTo("100000.00");
 	}
